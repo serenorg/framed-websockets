@@ -12,8 +12,6 @@ pub enum WebSocketError {
     ControlFrameFragmented,
     #[error("Ping frame too large")]
     PingFrameTooLarge,
-    #[error("Frame too large")]
-    FrameTooLarge,
     #[error("Sec-Websocket-Version must be 13")]
     InvalidSecWebsocketVersion,
     #[error("Invalid value")]

@@ -87,7 +87,6 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod close;
 mod error;
 mod frame;
 mod mask;
@@ -97,7 +96,6 @@ pub mod upgrade;
 use bytes::Buf;
 
 use bytes::BytesMut;
-use close::CloseCode;
 use futures_core::Stream;
 use futures_sink::Sink;
 use mask::unmask;
@@ -246,9 +244,7 @@ impl<S: AsyncWrite> Sink<Frame> for WebSocketServer<S> {
         // send a close message
         if !this.framed.codec().is_closed {
             ready!(this.framed.as_mut().poll_ready(cx))?;
-            this.framed
-                .as_mut()
-                .start_send(Frame::close(CloseCode::Away.into(), &[]))?;
+            this.framed.as_mut().start_send(Frame::close(1001, &[]))?;
         }
         debug_assert!(this.framed.codec().is_closed);
 
@@ -284,7 +280,7 @@ enum FrameDecoderState {
     Payload {
         fin: bool,
         op: OpCode,
-        len: usize,
+        len: u64,
         mask: [u8; 4],
     },
 }
@@ -364,11 +360,6 @@ impl Decoder for WsCodec {
                         _ => u64::from(length_code),
                     };
 
-                    let payload_len = match usize::try_from(payload_len) {
-                        Ok(length) => length,
-                        Err(_) => return Err(WebSocketError::FrameTooLarge),
-                    };
-
                     let mask = bytes[extra..extra + 4].try_into().unwrap();
 
                     if op == OpCode::Ping && payload_len > 125 {
@@ -383,7 +374,22 @@ impl Decoder for WsCodec {
                     }
                 }
                 FrameDecoderState::Payload { fin, op, len, mask } => {
-                    let max_len = usize::min(len, self.max_message_size);
+                    // Meh. Try and work out the max_len that satisfies
+                    // * max_len <= len
+                    // * max_len <= max_message_size
+                    let max_len = if usize::BITS < u64::BITS && (usize::MAX as u64) < len {
+                        // len is larger than usize::MAX. gotta split
+                        self.max_message_size
+                    } else if usize::BITS > u64::BITS && (u64::MAX as usize) < self.max_message_size
+                    {
+                        // max_message_size is larger than u64::MAX. will never split.
+                        len as usize
+                    } else {
+                        usize::min(len as usize, self.max_message_size)
+                    };
+                    assert!(u64::try_from(max_len).unwrap() <= len);
+                    assert!(max_len <= self.max_message_size);
+
                     if src.remaining() < max_len {
                         // Reserve a bit more to try to get next frame header and avoid a syscall to read it next time
                         src.reserve(max_len + MAX_HEADER_SIZE);
@@ -393,15 +399,15 @@ impl Decoder for WsCodec {
                     let mut payload = src.split_to(max_len);
                     unmask(&mut payload, mask);
 
-                    let frame = Frame::new(max_len == len && fin, op, payload.freeze());
+                    let frame = Frame::new(max_len as u64 == len && fin, op, payload.freeze());
 
-                    if max_len == len {
+                    if max_len as u64 == len {
                         self.decode_state = FrameDecoderState::Init;
                     } else {
                         self.decode_state = FrameDecoderState::Payload {
                             fin,
                             op: OpCode::Continuation,
-                            len: len - max_len,
+                            len: len - max_len as u64,
                             mask,
                         };
                     }
