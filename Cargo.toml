@@ -1,8 +1,8 @@
 [package]
 name = "framed-websockets"
 description = "A fast RFC6455 WebSocket server implementation"
-version = "0.7.1"
-authors = ["Divy Srivastava <dj.srivastava23@gmail.com>"]
+version = "0.1.0"
+authors = ["Conrad Ludgate <conrad@neon.tech>"]
 license = "Apache-2.0"
 edition = "2021"
 repository = "https://github.com/conradludgate/fastwebsockets"
@@ -14,7 +14,7 @@ tokio = { version = "1.25.0",  default-features = false, features = ["io-util"] 
 tokio-util = { version = "0.7.0", features = ["codec"] }
 hyper-util = { version = "0.1.0", features = ["tokio"] }
 http-body-util = { version = "0.1.0" }
-hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper = { version = "1", features = ["http1", "server"] }
 pin-project = { version = "1.0.8" }
 base64 = { version = "0.21.0" }
 sha1 = { version = "0.10.5" }
@@ -45,10 +45,6 @@ criterion = "0.4.0"
 anyhow = "1.0.71"
 webpki-roots = "0.23.0"
 bytes = "1.4.0"
-
-[[bench]]
-name = "unmask"
-harness = false
 
 # Build release with debug symbols: cargo build --profile=release-with-debug
 [profile.release-with-debug]

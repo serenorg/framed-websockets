@@ -1,4 +1,4 @@
-// Copyright 2023 Divy Srivastava <dj.srivastava23@gmail.com>
+// Copyright 2024 Conrad Ludgate <conrad@neon.tech>
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Singificant parts of this code were taken and inspired by
+// https://github.com/denoland/fastwebsockets
+// Copyright 2023 Divy Srivastava <dj.srivastava23@gmail.com>
 
 //! _framed_websockets_ is a minimal, fast WebSocket server implementation.
 //!
@@ -24,23 +28,21 @@
 //!
 //! ```
 //! use tokio::net::TcpStream;
-//! use fastwebsockets::{WebSocket, OpCode, Role};
+//! use framed_websockets::{WebSocketServer, OpCode};
 //! use anyhow::Result;
+//! use futures_util::stream::TryStreamExt;
+//! use futures_util::sink::SinkExt;
 //!
 //! async fn handle(
 //!   socket: TcpStream,
 //! ) -> Result<()> {
-//!   let mut ws = WebSocket::after_handshake(socket, Role::Server);
-//!   ws.set_writev(false);
-//!   ws.set_auto_close(true);
-//!   ws.set_auto_pong(true);
+//!   let mut ws = WebSocketServer::after_handshake(socket);
 //!
-//!   loop {
-//!     let frame = ws.read_frame().await?;
+//!   while let Some(frame) = ws.try_next().await? {
 //!     match frame.opcode {
 //!       OpCode::Close => break,
 //!       OpCode::Text | OpCode::Binary => {
-//!         ws.write_frame(frame).await?;
+//!         ws.send(frame).await?;
 //!       }
 //!       _ => {}
 //!     }
@@ -51,39 +53,18 @@
 //!
 //! ## Fragmentation
 //!
-//! By default, fastwebsockets will give the application raw frames with FIN set. Other
-//! crates like tungstenite which will give you a single message with all the frames
+//! `framed_websockets` will give the application raw frames with FIN set. Other
+//! crates like `tungstenite` which will give you a single message with all the frames
 //! concatenated.
-//!
-//! For concanated frames, use `FragmentCollector`:
-//! ```
-//! use fastwebsockets::{FragmentCollector, WebSocket, Role};
-//! use tokio::net::TcpStream;
-//! use anyhow::Result;
-//!
-//! async fn handle(
-//!   socket: TcpStream,
-//! ) -> Result<()> {
-//!   let mut ws = WebSocket::after_handshake(socket, Role::Server);
-//!   let mut ws = FragmentCollector::new(ws);
-//!   let incoming = ws.read_frame().await?;
-//!   // Always returns full messages
-//!   assert!(incoming.fin);
-//!   Ok(())
-//! }
-//! ```
 //!
 //! _permessage-deflate is not supported yet._
 //!
 //! ## HTTP Upgrades
 //!
-//! Enable the `upgrade` feature to do server-side upgrades and client-side
-//! handshakes.
-//!
-//! This feature is powered by [hyper](https://docs.rs/hyper).
+//! This crate supports handling server-side upgrades. This feature is powered by [hyper](https://docs.rs/hyper).
 //!
 //! ```
-//! use fastwebsockets::upgrade::upgrade;
+//! use framed_websockets::upgrade::upgrade;
 //! use http_body_util::Empty;
 //! use hyper::{Request, body::{Incoming, Bytes}, Response};
 //! use anyhow::Result;
@@ -99,52 +80,6 @@
 //!   });
 //!
 //!   Ok(response)
-//! }
-//! ```
-//!
-//! Use the `handshake` module for client-side handshakes.
-//!
-//! ```
-//! use fastwebsockets::handshake;
-//! use fastwebsockets::FragmentCollector;
-//! use hyper::{Request, body::Bytes, upgrade::Upgraded, header::{UPGRADE, CONNECTION}};
-//! use http_body_util::Empty;
-//! use hyper_util::rt::TokioIo;
-//! use tokio::net::TcpStream;
-//! use std::future::Future;
-//! use anyhow::Result;
-//!
-//! async fn connect() -> Result<FragmentCollector<TokioIo<Upgraded>>> {
-//!   let stream = TcpStream::connect("localhost:9001").await?;
-//!
-//!   let req = Request::builder()
-//!     .method("GET")
-//!     .uri("http://localhost:9001/")
-//!     .header("Host", "localhost:9001")
-//!     .header(UPGRADE, "websocket")
-//!     .header(CONNECTION, "upgrade")
-//!     .header(
-//!       "Sec-WebSocket-Key",
-//!       fastwebsockets::handshake::generate_key(),
-//!     )
-//!     .header("Sec-WebSocket-Version", "13")
-//!     .body(Empty::<Bytes>::new())?;
-//!
-//!   let (ws, _) = handshake::client(&SpawnExecutor, req, stream).await?;
-//!   Ok(FragmentCollector::new(ws))
-//! }
-//!
-//! // Tie hyper's executor to tokio runtime
-//! struct SpawnExecutor;
-//!
-//! impl<Fut> hyper::rt::Executor<Fut> for SpawnExecutor
-//! where
-//!   Fut: Future + Send + 'static,
-//!   Fut::Output: Send + 'static,
-//! {
-//!   fn execute(&self, fut: Fut) {
-//!     tokio::task::spawn(fut);
-//!   }
 //! }
 //! ```
 
