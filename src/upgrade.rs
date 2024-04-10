@@ -46,29 +46,6 @@ fn sec_websocket_protocol(key: &[u8]) -> String {
 
 type Error = WebSocketError;
 
-pub struct IncomingUpgrade {
-    key: String,
-    on_upgrade: hyper::upgrade::OnUpgrade,
-}
-
-impl IncomingUpgrade {
-    pub fn upgrade(self) -> Result<(Response<Empty<Bytes>>, UpgradeFut), Error> {
-        let response = Response::builder()
-            .status(hyper::StatusCode::SWITCHING_PROTOCOLS)
-            .header(hyper::header::CONNECTION, "upgrade")
-            .header(hyper::header::UPGRADE, "websocket")
-            .header("Sec-WebSocket-Accept", self.key)
-            .body(Empty::new())
-            .expect("bug: failed to build response");
-
-        let stream = UpgradeFut {
-            inner: self.on_upgrade,
-        };
-
-        Ok((response, stream))
-    }
-}
-
 /// A future that resolves to a websocket stream when the associated HTTP upgrade completes.
 #[pin_project]
 #[derive(Debug)]

@@ -95,6 +95,7 @@ pub mod upgrade;
 use bytes::Buf;
 
 use bytes::BytesMut;
+use close::CloseCode;
 use futures_core::Stream;
 use futures_sink::Sink;
 use mask::unmask;
@@ -110,7 +111,6 @@ use tokio_util::codec::Framed;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 
-pub use crate::close::CloseCode;
 pub use crate::error::WebSocketError;
 pub use crate::frame::Frame;
 pub use crate::frame::OpCode;
