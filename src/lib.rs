@@ -208,7 +208,6 @@ impl<S: AsyncRead + AsyncWrite> Stream for WebSocketServer<S> {
 
             if let Some(frame) = res? {
                 if is_closed && frame.opcode != OpCode::Close {
-                    ready!(self.as_mut().flush_obligation(cx))?;
                     return Poll::Ready(None);
                 }
                 return Poll::Ready(Some(Ok(frame)));
@@ -244,7 +243,7 @@ impl<S: AsyncWrite> Sink<Frame> for WebSocketServer<S> {
         // send a close message
         if !this.framed.codec().is_closed {
             ready!(this.framed.as_mut().poll_ready(cx))?;
-            this.framed.as_mut().start_send(Frame::close(1001, &[]))?;
+            this.framed.as_mut().start_send(Frame::close(1000, &[]))?;
         }
         debug_assert!(this.framed.codec().is_closed);
 

@@ -16,3 +16,4 @@ run-server: build-server
 		$(AUTOBAHN_TESTSUITE_DOCKER) \
 	  wstest -m fuzzingclient -s fuzzingclient.json
 	../target/release/examples/echo_server
+	

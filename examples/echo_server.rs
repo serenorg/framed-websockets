@@ -29,16 +29,26 @@ use tokio::net::TcpListener;
 async fn handle_client(fut: upgrade::UpgradeFut) -> Result<(), WebSocketError> {
     let mut ws = fut.await?;
 
+    let mut expect_cont = false;
     while let Some(frame) = ws.next().await {
         let frame = frame?;
+        let fin = frame.fin;
         match frame.opcode {
             OpCode::Close => break,
-            OpCode::Text | OpCode::Binary => {
+            OpCode::Text | OpCode::Binary if expect_cont => {
+                break;
+            }
+            OpCode::Continuation if !expect_cont => {
+                break;
+            }
+            OpCode::Text | OpCode::Binary | OpCode::Continuation => {
                 ws.send(frame).await?;
             }
             _ => {}
         }
+        expect_cont = !fin;
     }
+    ws.close().await?;
 
     Ok(())
 }

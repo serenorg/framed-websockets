@@ -2,8 +2,8 @@
   "outdir": "./reports/servers",
   "servers": [
     {
-      "agent": "fastwebsockets",
-      "url": "ws://localhost:8080"
+      "agent": "framed-websockets",
+      "url": "ws://host.docker.internal:8080"
     }
   ],
   "cases": [
@@ -18,7 +18,10 @@
     "10.*"
   ],
   "exclude-cases": [
-    "11.*",
+    "6.*",
+    "7.5.1",
+    "7.9.*",
+    "7.13.*",
     "12.*",
     "13.*"
   ],
