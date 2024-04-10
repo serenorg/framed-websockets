@@ -4,8 +4,8 @@ use thiserror::Error;
 pub enum WebSocketError {
     #[error("Invalid fragment")]
     InvalidFragment,
-    #[error("Invalid UTF-8")]
-    InvalidUTF8,
+    #[error("Unmasked frame from client")]
+    UnmaskedFrameFromClient,
     #[error("Invalid continuation frame")]
     InvalidContinuationFrame,
     #[error("Invalid status code: {0}")]

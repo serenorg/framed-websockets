@@ -271,14 +271,13 @@ enum FrameDecoderState {
     Header {
         fin: bool,
         op: OpCode,
-        masked: bool,
         length_code: u8,
     },
     Payload {
         fin: bool,
         op: OpCode,
         len: usize,
-        mask: Option<[u8; 4]>,
+        mask: [u8; 4],
     },
 }
 
@@ -314,6 +313,11 @@ impl Decoder for WsCodec {
                     let masked = b & 0b10000000 != 0;
                     let length_code = b & 0x7F;
 
+                    // clients must always mask the payload
+                    if !masked {
+                        return Err(WebSocketError::UnmaskedFrameFromClient);
+                    }
+
                     if frame::is_control(op) && !fin {
                         return Err(WebSocketError::ControlFrameFragmented);
                     }
@@ -322,12 +326,10 @@ impl Decoder for WsCodec {
                     FrameDecoderState::Header {
                         op,
                         fin,
-                        masked,
                         length_code,
                     }
                 }
                 FrameDecoderState::Header {
-                    masked,
                     length_code,
                     op,
                     fin,
@@ -338,7 +340,7 @@ impl Decoder for WsCodec {
                         _ => 0,
                     };
 
-                    let needed = extra + masked as usize * 4;
+                    let needed = extra + 4;
                     if src.remaining() < needed {
                         src.reserve(needed);
                         return Ok(None);
@@ -357,11 +359,7 @@ impl Decoder for WsCodec {
                         Err(_) => return Err(WebSocketError::FrameTooLarge),
                     };
 
-                    let mask = if masked {
-                        Some(bytes[extra..extra + 4].try_into().unwrap())
-                    } else {
-                        None
-                    };
+                    let mask = bytes[extra..extra + 4].try_into().unwrap();
 
                     if op == OpCode::Ping && payload_len > 125 {
                         return Err(WebSocketError::PingFrameTooLarge);
@@ -386,9 +384,7 @@ impl Decoder for WsCodec {
                     }
 
                     let mut payload = src.split_to(len);
-                    if let Some(mask) = mask {
-                        unmask(&mut payload, mask);
-                    }
+                    unmask(&mut payload, mask);
                     let frame = Frame::new(fin, op, payload.freeze());
 
                     self.decode_state = FrameDecoderState::Init;
