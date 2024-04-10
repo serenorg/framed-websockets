@@ -97,6 +97,7 @@ use bytes::Buf;
 use bytes::BytesMut;
 use futures_core::Stream;
 use futures_sink::Sink;
+use mask::unmask;
 use pin_project::pin_project;
 use std::pin::Pin;
 use std::task::ready;
@@ -113,7 +114,6 @@ pub use crate::close::CloseCode;
 pub use crate::error::WebSocketError;
 pub use crate::frame::Frame;
 pub use crate::frame::OpCode;
-pub use crate::mask::unmask;
 
 /// WebSocket protocol implementation over an async stream.
 #[pin_project]
@@ -254,34 +254,12 @@ pub(crate) fn process_frame(
 ) -> (Result<Option<Frame>, WebSocketError>, Option<Frame>) {
     match frame.opcode {
         OpCode::Close => {
-            match frame.payload.len() {
-                0 => {}
-                1 => return (Err(WebSocketError::InvalidCloseFrame), None),
-                _ => {
-                    let code = close::CloseCode::from(u16::from_be_bytes(
-                        frame.payload[0..2].try_into().unwrap(),
-                    ));
-
-                    if !code.is_allowed() {
-                        return (
-                            Err(WebSocketError::InvalidCloseCode),
-                            Some(Frame::close_raw(frame.payload)),
-                        );
-                    }
-                }
-            };
-
+            // technically we should check the payload... but we don't need it...
             let obligated_send = Frame::close_raw(std::mem::take(&mut frame.payload));
             (Ok(Some(frame)), Some(obligated_send))
         }
         OpCode::Ping => (Ok(None), Some(Frame::pong(frame.payload))),
-        OpCode::Text => {
-            if frame.fin && !frame.is_utf8() {
-                (Err(WebSocketError::InvalidUTF8), None)
-            } else {
-                (Ok(Some(frame)), None)
-            }
-        }
+        // we should technically check for utf8 text, but we don't want text anyway
         _ => (Ok(Some(frame)), None),
     }
 }
@@ -290,7 +268,12 @@ const MAX_HEADER_SIZE: usize = 14;
 
 enum FrameDecoderState {
     Init,
-    Header([u8; 2]),
+    Header {
+        fin: bool,
+        op: OpCode,
+        masked: bool,
+        length_code: u8,
+    },
     Payload {
         fin: bool,
         op: OpCode,
@@ -326,13 +309,29 @@ impl Decoder for WsCodec {
                         return Err(WebSocketError::ReservedBitsNotZero);
                     }
 
-                    src.advance(2);
-                    FrameDecoderState::Header([a, b])
-                }
-                FrameDecoderState::Header([a, b]) => {
+                    let op = frame::OpCode::try_from(a & 0b00001111)?;
+                    let fin = a & 0b10000000 != 0;
                     let masked = b & 0b10000000 != 0;
-
                     let length_code = b & 0x7F;
+
+                    if frame::is_control(op) && !fin {
+                        return Err(WebSocketError::ControlFrameFragmented);
+                    }
+
+                    src.advance(2);
+                    FrameDecoderState::Header {
+                        op,
+                        fin,
+                        masked,
+                        length_code,
+                    }
+                }
+                FrameDecoderState::Header {
+                    masked,
+                    length_code,
+                    op,
+                    fin,
+                } => {
                     let extra = match length_code {
                         126 => 2,
                         127 => 8,
@@ -346,9 +345,6 @@ impl Decoder for WsCodec {
                     }
 
                     let bytes = src.split_to(needed);
-
-                    let masked = b & 0b10000000 != 0;
-                    let length_code = b & 0x7F;
 
                     let payload_len = match length_code {
                         126 => u64::from(u16::from_be_bytes(bytes[0..2].try_into().unwrap())),
@@ -367,14 +363,7 @@ impl Decoder for WsCodec {
                         None
                     };
 
-                    let opcode = frame::OpCode::try_from(a & 0b00001111)?;
-                    let fin = a & 0b10000000 != 0;
-
-                    if frame::is_control(opcode) && !fin {
-                        return Err(WebSocketError::ControlFrameFragmented);
-                    }
-
-                    if opcode == OpCode::Ping && payload_len > 125 {
+                    if op == OpCode::Ping && payload_len > 125 {
                         return Err(WebSocketError::PingFrameTooLarge);
                     }
 
@@ -384,7 +373,7 @@ impl Decoder for WsCodec {
 
                     FrameDecoderState::Payload {
                         fin,
-                        op: opcode,
+                        op,
                         len: payload_len,
                         mask,
                     }
