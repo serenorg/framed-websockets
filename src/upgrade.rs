@@ -37,44 +37,44 @@ use crate::WebSocketError;
 use crate::WebSocketServer;
 
 fn sec_websocket_protocol(key: &[u8]) -> String {
-  let mut sha1 = Sha1::new();
-  sha1.update(key);
-  sha1.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"); // magic string
-  let result = sha1.finalize();
-  STANDARD.encode(&result[..])
+    let mut sha1 = Sha1::new();
+    sha1.update(key);
+    sha1.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"); // magic string
+    let result = sha1.finalize();
+    STANDARD.encode(&result[..])
 }
 
 type Error = WebSocketError;
 
 pub struct IncomingUpgrade {
-  key: String,
-  on_upgrade: hyper::upgrade::OnUpgrade,
+    key: String,
+    on_upgrade: hyper::upgrade::OnUpgrade,
 }
 
 impl IncomingUpgrade {
-  pub fn upgrade(self) -> Result<(Response<Empty<Bytes>>, UpgradeFut), Error> {
-    let response = Response::builder()
-      .status(hyper::StatusCode::SWITCHING_PROTOCOLS)
-      .header(hyper::header::CONNECTION, "upgrade")
-      .header(hyper::header::UPGRADE, "websocket")
-      .header("Sec-WebSocket-Accept", self.key)
-      .body(Empty::new())
-      .expect("bug: failed to build response");
+    pub fn upgrade(self) -> Result<(Response<Empty<Bytes>>, UpgradeFut), Error> {
+        let response = Response::builder()
+            .status(hyper::StatusCode::SWITCHING_PROTOCOLS)
+            .header(hyper::header::CONNECTION, "upgrade")
+            .header(hyper::header::UPGRADE, "websocket")
+            .header("Sec-WebSocket-Accept", self.key)
+            .body(Empty::new())
+            .expect("bug: failed to build response");
 
-    let stream = UpgradeFut {
-      inner: self.on_upgrade,
-    };
+        let stream = UpgradeFut {
+            inner: self.on_upgrade,
+        };
 
-    Ok((response, stream))
-  }
+        Ok((response, stream))
+    }
 }
 
 /// A future that resolves to a websocket stream when the associated HTTP upgrade completes.
 #[pin_project]
 #[derive(Debug)]
 pub struct UpgradeFut {
-  #[pin]
-  inner: hyper::upgrade::OnUpgrade,
+    #[pin]
+    inner: hyper::upgrade::OnUpgrade,
 }
 
 /// Try to upgrade a received `hyper::Request` to a websocket connection.
@@ -92,39 +92,39 @@ pub struct UpgradeFut {
 /// Alternatively you can inspect the `Connection` and `Upgrade` headers manually.
 ///
 pub fn upgrade<B>(
-  mut request: impl std::borrow::BorrowMut<Request<B>>,
+    mut request: impl std::borrow::BorrowMut<Request<B>>,
 ) -> Result<(Response<Empty<Bytes>>, UpgradeFut), Error> {
-  let request = request.borrow_mut();
+    let request = request.borrow_mut();
 
-  let key = request
-    .headers()
-    .get("Sec-WebSocket-Key")
-    .ok_or(WebSocketError::MissingSecWebSocketKey)?;
-  if request
-    .headers()
-    .get("Sec-WebSocket-Version")
-    .map(|v| v.as_bytes())
-    != Some(b"13")
-  {
-    return Err(WebSocketError::InvalidSecWebsocketVersion);
-  }
+    let key = request
+        .headers()
+        .get("Sec-WebSocket-Key")
+        .ok_or(WebSocketError::MissingSecWebSocketKey)?;
+    if request
+        .headers()
+        .get("Sec-WebSocket-Version")
+        .map(|v| v.as_bytes())
+        != Some(b"13")
+    {
+        return Err(WebSocketError::InvalidSecWebsocketVersion);
+    }
 
-  let response = Response::builder()
-    .status(hyper::StatusCode::SWITCHING_PROTOCOLS)
-    .header(hyper::header::CONNECTION, "upgrade")
-    .header(hyper::header::UPGRADE, "websocket")
-    .header(
-      "Sec-WebSocket-Accept",
-      &sec_websocket_protocol(key.as_bytes()),
-    )
-    .body(Empty::new())
-    .expect("bug: failed to build response");
+    let response = Response::builder()
+        .status(hyper::StatusCode::SWITCHING_PROTOCOLS)
+        .header(hyper::header::CONNECTION, "upgrade")
+        .header(hyper::header::UPGRADE, "websocket")
+        .header(
+            "Sec-WebSocket-Accept",
+            &sec_websocket_protocol(key.as_bytes()),
+        )
+        .body(Empty::new())
+        .expect("bug: failed to build response");
 
-  let stream = UpgradeFut {
-    inner: hyper::upgrade::on(request),
-  };
+    let stream = UpgradeFut {
+        inner: hyper::upgrade::on(request),
+    };
 
-  Ok((response, stream))
+    Ok((response, stream))
 }
 
 /// Check if a request is a websocket upgrade request.
@@ -134,65 +134,60 @@ pub fn upgrade<B>(
 /// If the server supports multiple upgrade protocols,
 /// it would be more appropriate to try each listed protocol in order.
 pub fn is_upgrade_request<B>(request: &hyper::Request<B>) -> bool {
-  header_contains_value(request.headers(), hyper::header::CONNECTION, "Upgrade")
-    && header_contains_value(
-      request.headers(),
-      hyper::header::UPGRADE,
-      "websocket",
-    )
+    header_contains_value(request.headers(), hyper::header::CONNECTION, "Upgrade")
+        && header_contains_value(request.headers(), hyper::header::UPGRADE, "websocket")
 }
 
 /// Check if there is a header of the given name containing the wanted value.
 fn header_contains_value(
-  headers: &hyper::HeaderMap,
-  header: impl hyper::header::AsHeaderName,
-  value: impl AsRef<[u8]>,
+    headers: &hyper::HeaderMap,
+    header: impl hyper::header::AsHeaderName,
+    value: impl AsRef<[u8]>,
 ) -> bool {
-  let value = value.as_ref();
-  for header in headers.get_all(header) {
-    if header
-      .as_bytes()
-      .split(|&c| c == b',')
-      .any(|x| trim(x).eq_ignore_ascii_case(value))
-    {
-      return true;
+    let value = value.as_ref();
+    for header in headers.get_all(header) {
+        if header
+            .as_bytes()
+            .split(|&c| c == b',')
+            .any(|x| trim(x).eq_ignore_ascii_case(value))
+        {
+            return true;
+        }
     }
-  }
-  false
+    false
 }
 
 fn trim(data: &[u8]) -> &[u8] {
-  trim_end(trim_start(data))
+    trim_end(trim_start(data))
 }
 
 fn trim_start(data: &[u8]) -> &[u8] {
-  if let Some(start) = data.iter().position(|x| !x.is_ascii_whitespace()) {
-    &data[start..]
-  } else {
-    b""
-  }
+    if let Some(start) = data.iter().position(|x| !x.is_ascii_whitespace()) {
+        &data[start..]
+    } else {
+        b""
+    }
 }
 
 fn trim_end(data: &[u8]) -> &[u8] {
-  if let Some(last) = data.iter().rposition(|x| !x.is_ascii_whitespace()) {
-    &data[..last + 1]
-  } else {
-    b""
-  }
+    if let Some(last) = data.iter().rposition(|x| !x.is_ascii_whitespace()) {
+        &data[..last + 1]
+    } else {
+        b""
+    }
 }
 
 impl std::future::Future for UpgradeFut {
-  type Output =
-    Result<WebSocketServer<TokioIo<hyper::upgrade::Upgraded>>, Error>;
+    type Output = Result<WebSocketServer<TokioIo<hyper::upgrade::Upgraded>>, Error>;
 
-  fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-    let this = self.project();
-    let upgraded = match this.inner.poll(cx) {
-      Poll::Pending => return Poll::Pending,
-      Poll::Ready(x) => x,
-    };
-    Poll::Ready(Ok(WebSocketServer::after_handshake(TokioIo::new(
-      upgraded?,
-    ))))
-  }
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let this = self.project();
+        let upgraded = match this.inner.poll(cx) {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(x) => x,
+        };
+        Poll::Ready(Ok(WebSocketServer::after_handshake(TokioIo::new(
+            upgraded?,
+        ))))
+    }
 }

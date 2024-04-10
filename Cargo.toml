@@ -1,31 +1,11 @@
 [package]
-name = "fastwebsockets"
+name = "framed-websockets"
 description = "A fast RFC6455 WebSocket server implementation"
 version = "0.7.1"
 authors = ["Divy Srivastava <dj.srivastava23@gmail.com>"]
 license = "Apache-2.0"
 edition = "2021"
 repository = "https://github.com/conradludgate/fastwebsockets"
-
-[[example]]
-name = "echo_server"
-path = "examples/echo_server.rs"
-required-features = ["upgrade"]
-
-[[example]]
-name = "autobahn_client"
-path = "examples/autobahn_client.rs"
-required-features = ["upgrade"]
-
-[[example]]
-name = "tls_client"
-path = "examples/tls_client.rs"
-required-features = ["upgrade"]
-
-[[example]]
-name = "axum"
-path = "examples/axum.rs"
-required-features = ["upgrade", "with_axum"]
 
 [dependencies]
 futures-core = "0.3"
@@ -38,7 +18,6 @@ hyper = { version = "1", features = ["http1", "server", "client"] }
 pin-project = { version = "1.0.8" }
 base64 = { version = "0.21.0" }
 sha1 = { version = "0.10.5" }
-utf-8 = "0.7.5"
 rand = "0.8.4"
 thiserror = "1.0.40"
 bytes = "1.5.0"
@@ -52,6 +31,8 @@ async-trait = { version = "0.1", optional = true }
 default = []
 
 [dev-dependencies]
+futures-util = { version = "0.3", features = ["sink"] }
+fastwebsockets = { version = "0.7.1", features = ["upgrade"] }
 tokio = { version = "1.25.0", features = ["full", "macros"] }
 tokio-rustls = "0.24.0"
 rustls-pemfile = "1.0"
@@ -64,7 +45,6 @@ criterion = "0.4.0"
 anyhow = "1.0.71"
 webpki-roots = "0.23.0"
 bytes = "1.4.0"
-axum = "0.7.4"
 
 [[bench]]
 name = "unmask"
@@ -79,6 +59,3 @@ debug = true
 opt-level = 3
 lto = true
 codegen-units = 1
-
-[package.metadata.docs.rs]
-features = ["upgrade", "with_axum"]

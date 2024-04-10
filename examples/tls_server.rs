@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use anyhow::Result;
-use fastwebsockets::upgrade;
-use fastwebsockets::OpCode;
+use framed_websockets::upgrade;
+use framed_websockets::OpCode;
+use futures_util::SinkExt;
+use futures_util::StreamExt;
 use http_body_util::Empty;
 use hyper::body::Bytes;
 use hyper::body::Incoming;
@@ -30,75 +32,70 @@ use tokio_rustls::rustls::PrivateKey;
 use tokio_rustls::TlsAcceptor;
 
 async fn handle_client(fut: upgrade::UpgradeFut) -> Result<()> {
-  let mut ws = fut.await?;
-  ws.set_writev(false);
-  let mut ws = fastwebsockets::FragmentCollector::new(ws);
+    let mut ws = fut.await?;
 
-  loop {
-    let frame = ws.read_frame().await?;
-    match frame.opcode {
-      OpCode::Close => break,
-      OpCode::Text | OpCode::Binary => {
-        ws.write_frame(frame).await?;
-      }
-      _ => {}
+    while let Some(frame) = ws.next().await {
+        let frame = frame?;
+        match frame.opcode {
+            OpCode::Close => break,
+            OpCode::Text | OpCode::Binary => {
+                ws.send(frame).await?;
+            }
+            _ => {}
+        }
     }
-  }
 
-  Ok(())
+    Ok(())
 }
 
-async fn server_upgrade(
-  mut req: Request<Incoming>,
-) -> Result<Response<Empty<Bytes>>> {
-  let (response, fut) = upgrade::upgrade(&mut req)?;
+async fn server_upgrade(mut req: Request<Incoming>) -> Result<Response<Empty<Bytes>>> {
+    let (response, fut) = upgrade::upgrade(&mut req)?;
 
-  tokio::spawn(async move {
-    if let Err(e) = handle_client(fut).await {
-      eprintln!("Error in websocket connection: {}", e);
-    }
-  });
+    tokio::spawn(async move {
+        if let Err(e) = handle_client(fut).await {
+            eprintln!("Error in websocket connection: {}", e);
+        }
+    });
 
-  Ok(response)
+    Ok(response)
 }
 
 fn tls_acceptor() -> Result<TlsAcceptor> {
-  static KEY: &[u8] = include_bytes!("./localhost.key");
-  static CERT: &[u8] = include_bytes!("./localhost.crt");
+    static KEY: &[u8] = include_bytes!("./localhost.key");
+    static CERT: &[u8] = include_bytes!("./localhost.crt");
 
-  let mut keys: Vec<PrivateKey> =
-    rustls_pemfile::pkcs8_private_keys(&mut &*KEY)
-      .map(|mut certs| certs.drain(..).map(PrivateKey).collect())
-      .unwrap();
-  let certs = rustls_pemfile::certs(&mut &*CERT)
-    .map(|mut certs| certs.drain(..).map(Certificate).collect())
-    .unwrap();
-  dbg!(&certs);
-  let config = rustls::ServerConfig::builder()
-    .with_safe_defaults()
-    .with_no_client_auth()
-    .with_single_cert(certs, keys.remove(0))?;
-  Ok(TlsAcceptor::from(Arc::new(config)))
+    let mut keys: Vec<PrivateKey> = rustls_pemfile::pkcs8_private_keys(&mut &*KEY)
+        .map(|mut certs| certs.drain(..).map(PrivateKey).collect())
+        .unwrap();
+    let certs = rustls_pemfile::certs(&mut &*CERT)
+        .map(|mut certs| certs.drain(..).map(Certificate).collect())
+        .unwrap();
+    dbg!(&certs);
+    let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(certs, keys.remove(0))?;
+    Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-  let acceptor = tls_acceptor()?;
-  let listener = TcpListener::bind("127.0.0.1:8080").await?;
-  println!("Server started, listening on {}", "127.0.0.1:8080");
-  loop {
-    let (stream, _) = listener.accept().await?;
-    println!("Client connected");
-    let acceptor = acceptor.clone();
-    tokio::spawn(async move {
-      let stream = acceptor.accept(stream).await.unwrap();
-      let io = hyper_util::rt::TokioIo::new(stream);
-      let conn_fut = http1::Builder::new()
-        .serve_connection(io, service_fn(server_upgrade))
-        .with_upgrades();
-      if let Err(e) = conn_fut.await {
-        println!("An error occurred: {:?}", e);
-      }
-    });
-  }
+    let acceptor = tls_acceptor()?;
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    println!("Server started, listening on {}", "127.0.0.1:8080");
+    loop {
+        let (stream, _) = listener.accept().await?;
+        println!("Client connected");
+        let acceptor = acceptor.clone();
+        tokio::spawn(async move {
+            let stream = acceptor.accept(stream).await.unwrap();
+            let io = hyper_util::rt::TokioIo::new(stream);
+            let conn_fut = http1::Builder::new()
+                .serve_connection(io, service_fn(server_upgrade))
+                .with_upgrades();
+            if let Err(e) = conn_fut.await {
+                println!("An error occurred: {:?}", e);
+            }
+        });
+    }
 }

@@ -2,10 +2,11 @@
 
 use libfuzzer_sys::fuzz_target;
 
-use tokio::sync::oneshot::Sender;
-use tokio::sync::oneshot;
+use futures::stream::StreamExt;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio::sync::oneshot;
+use tokio::sync::oneshot::Sender;
 
 #[derive(Debug)]
 struct ArbitraryByteStream {
@@ -15,10 +16,7 @@ struct ArbitraryByteStream {
 
 impl ArbitraryByteStream {
   fn new(data: Vec<u8>, tx: Sender<()>) -> Self {
-    Self {
-      data,
-      tx: Some(tx),
-    }
+    Self { data, tx: Some(tx) }
   }
 }
 
@@ -37,7 +35,7 @@ impl tokio::io::AsyncRead for ArbitraryByteStream {
       if let Some(tx) = this.tx.take() {
         let _ = tx.send(()).unwrap();
       }
-    
+
       return Poll::Pending;
     }
 
@@ -73,18 +71,14 @@ fuzz_target!(|data: &[u8]| {
   let (tx, rx) = oneshot::channel();
   let stream = ArbitraryByteStream::new(data.to_vec(), tx);
 
-  let mut ws = fastwebsockets::WebSocket::after_handshake(stream, fastwebsockets::Role::Server);
-  ws.set_writev(false);
-  ws.set_auto_close(true);
-  ws.set_auto_pong(true);
-  ws.set_max_message_size(u16::MAX as usize);
+  let mut ws = framed_websockets::WebSocketServer::after_handshake(stream);
 
   futures::executor::block_on(async move {
     tokio::select! {
         // We've read all the data, so we're done
         _ = rx => {}
         // We've read a frame, so we're done
-        _ = ws.read_frame() => {}
+        _ = ws.next() => {}
     }
   });
 });
