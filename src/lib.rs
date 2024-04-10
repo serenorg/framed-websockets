@@ -18,7 +18,7 @@
 
 //! _framed_websockets_ is a minimal, fast WebSocket server implementation.
 //!
-//! [https://github.com/conradludgate/fastwebsockets](https://github.com/conradludgate/fastwebsockets)
+//! [https://github.com/neondatabase/framed-websockets](https://github.com/neondatabase/framed-websockets)
 //!
 //! Passes the _Autobahn|TestSuite_ and fuzzed with LLVM's _libfuzzer_.
 //!
