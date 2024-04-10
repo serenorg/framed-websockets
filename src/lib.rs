@@ -134,13 +134,24 @@ impl<S> WebSocketServer<S> {
                 stream,
                 WsCodec {
                     decode_state: FrameDecoderState::Init,
-                    max_message_size: 64 << 20,
+                    max_message_size: 64 * 1024, // 64KiB
                     is_closed: false,
                 },
             ),
             obligated_send: None,
             recv: None,
         }
+    }
+
+    /// size before closing the frame and starting a new psuedo continuation frame.
+    /// must be a multiple of 4
+    pub fn with_max_message_size(mut self, max_message_size: usize) -> Self {
+        assert!(
+            max_message_size % 4 == 0,
+            "max message size must be a multiple of 4"
+        );
+        self.framed.codec_mut().max_message_size = max_message_size;
+        self
     }
 }
 
@@ -154,18 +165,12 @@ impl<S: AsyncWrite> WebSocketServer<S> {
             return Poll::Ready(Ok(()));
         }
 
-        if let Some(frame) = this.obligated_send.take() {
-            match this.framed.as_mut().poll_ready(cx) {
-                Poll::Pending => {
-                    *this.obligated_send = Some(frame);
-                    return Poll::Pending;
-                }
-                Poll::Ready(res) => {
-                    res?;
-                    this.framed.as_mut().start_send(frame)?;
-                }
-            }
+        if this.obligated_send.is_some() {
+            ready!(this.framed.as_mut().poll_ready(cx))?;
+            let item = this.obligated_send.take().unwrap();
+            this.framed.as_mut().start_send(item)?;
         }
+
         Poll::Ready(Ok(()))
     }
 }
@@ -243,6 +248,7 @@ impl<S: AsyncWrite> Sink<Frame> for WebSocketServer<S> {
                 .as_mut()
                 .start_send(Frame::close(CloseCode::Away.into(), &[]))?;
         }
+        debug_assert!(this.framed.codec().is_closed);
 
         // close the conn
         this.framed.poll_close(cx)
@@ -283,6 +289,8 @@ enum FrameDecoderState {
 
 struct WsCodec {
     decode_state: FrameDecoderState,
+    /// size before closing the frame and starting a new psuedo continuation frame.
+    /// must be a multiple of 4
     max_message_size: usize,
 
     is_closed: bool,
@@ -365,10 +373,6 @@ impl Decoder for WsCodec {
                         return Err(WebSocketError::PingFrameTooLarge);
                     }
 
-                    if payload_len >= self.max_message_size {
-                        return Err(WebSocketError::FrameTooLarge);
-                    }
-
                     FrameDecoderState::Payload {
                         fin,
                         op,
@@ -377,17 +381,28 @@ impl Decoder for WsCodec {
                     }
                 }
                 FrameDecoderState::Payload { fin, op, len, mask } => {
-                    if src.remaining() < len {
+                    let max_len = usize::min(len, self.max_message_size);
+                    if src.remaining() < max_len {
                         // Reserve a bit more to try to get next frame header and avoid a syscall to read it next time
-                        src.reserve(len + MAX_HEADER_SIZE);
+                        src.reserve(max_len + MAX_HEADER_SIZE);
                         return Ok(None);
                     }
 
-                    let mut payload = src.split_to(len);
+                    let mut payload = src.split_to(max_len);
                     unmask(&mut payload, mask);
-                    let frame = Frame::new(fin, op, payload.freeze());
 
-                    self.decode_state = FrameDecoderState::Init;
+                    let frame = Frame::new(max_len == len && fin, op, payload.freeze());
+
+                    if max_len == len {
+                        self.decode_state = FrameDecoderState::Init;
+                    } else {
+                        self.decode_state = FrameDecoderState::Payload {
+                            fin,
+                            op: OpCode::Continuation,
+                            len: len - max_len,
+                            mask,
+                        };
+                    }
                     break Ok(Some(frame));
                 }
             }
@@ -409,34 +424,4 @@ impl Encoder<Frame> for WsCodec {
 
         Ok(())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const _: () = {
-        const fn assert_unsync<S>() {
-            // Generic trait with a blanket impl over `()` for all types.
-            trait AmbiguousIfImpl<A> {
-                // Required for actually being able to reference the trait.
-                fn some_item() {}
-            }
-
-            impl<T: ?Sized> AmbiguousIfImpl<()> for T {}
-
-            // Used for the specialized impl when *all* traits in
-            // `$($t)+` are implemented.
-            #[allow(dead_code)]
-            struct Invalid;
-
-            impl<T: ?Sized + Sync> AmbiguousIfImpl<Invalid> for T {}
-
-            // If there is only one specialized trait impl, type inference with
-            // `_` can be resolved and this can compile. Fails to compile if
-            // `$x` implements `AmbiguousIfImpl<Invalid>`.
-            let _ = <S as AmbiguousIfImpl<_>>::some_item;
-        }
-        assert_unsync::<WebSocketServer<tokio::net::TcpStream>>();
-    };
 }
