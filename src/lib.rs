@@ -57,6 +57,8 @@
 //! crates like `tungstenite` which will give you a single message with all the frames
 //! concatenated.
 //!
+//! Usage of the `max_message_size` with further fragment incoming messages to avoid buffering too much in memory.
+//!
 //! _permessage-deflate is not supported yet._
 //!
 //! ## HTTP Upgrades
