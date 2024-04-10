@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use tokio::io::AsyncWriteExt;
-
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use core::ops::Deref;
 
 use crate::WebSocketError;
@@ -127,7 +125,7 @@ impl<'a, const N: usize> PartialEq<&'_ [u8; N]> for Payload<'a> {
 }
 
 /// Represents a WebSocket frame.
-pub struct Frame<'f> {
+pub struct Frame {
   /// Indicates if this is the final frame in a message.
   pub fin: bool,
   /// The opcode of the frame.
@@ -135,18 +133,18 @@ pub struct Frame<'f> {
   /// The masking key of the frame, if any.
   mask: Option<[u8; 4]>,
   /// The payload of the frame.
-  pub payload: Payload<'f>,
+  pub payload: BytesMut,
 }
 
 const MAX_HEAD_SIZE: usize = 16;
 
-impl<'f> Frame<'f> {
+impl Frame {
   /// Creates a new WebSocket `Frame`.
   pub fn new(
     fin: bool,
     opcode: OpCode,
     mask: Option<[u8; 4]>,
-    payload: Payload<'f>,
+    payload: BytesMut,
   ) -> Self {
     Self {
       fin,
@@ -156,24 +154,10 @@ impl<'f> Frame<'f> {
     }
   }
 
-  /// Create a new WebSocket text `Frame`.
-  ///
-  /// This is a convenience method for `Frame::new(true, OpCode::Text, None, payload)`.
-  ///
-  /// This method does not check if the payload is valid UTF-8.
-  pub fn text(payload: Payload<'f>) -> Self {
-    Self {
-      fin: true,
-      opcode: OpCode::Text,
-      mask: None,
-      payload,
-    }
-  }
-
   /// Create a new WebSocket binary `Frame`.
   ///
   /// This is a convenience method for `Frame::new(true, OpCode::Binary, None, payload)`.
-  pub fn binary(payload: Payload<'f>) -> Self {
+  pub fn binary(payload: BytesMut) -> Self {
     Self {
       fin: true,
       opcode: OpCode::Binary,
@@ -188,15 +172,15 @@ impl<'f> Frame<'f> {
   ///
   /// This method does not check if `code` is a valid close code and `reason` is valid UTF-8.
   pub fn close(code: u16, reason: &[u8]) -> Self {
-    let mut payload = Vec::with_capacity(2 + reason.len());
-    payload.extend_from_slice(&code.to_be_bytes());
-    payload.extend_from_slice(reason);
+    let mut payload = BytesMut::with_capacity(2 + reason.len());
+    payload.put_u16(code);
+    payload.put(reason);
 
     Self {
       fin: true,
       opcode: OpCode::Close,
       mask: None,
-      payload: payload.into(),
+      payload,
     }
   }
 
@@ -205,7 +189,7 @@ impl<'f> Frame<'f> {
   /// This is a convenience method for `Frame::new(true, OpCode::Close, None, payload)`.
   ///
   /// This method does not check if `payload` is valid Close frame payload.
-  pub fn close_raw(payload: Payload<'f>) -> Self {
+  pub fn close_raw(payload: BytesMut) -> Self {
     Self {
       fin: true,
       opcode: OpCode::Close,
@@ -217,7 +201,7 @@ impl<'f> Frame<'f> {
   /// Create a new WebSocket pong `Frame`.
   ///
   /// This is a convenience method for `Frame::new(true, OpCode::Pong, None, payload)`.
-  pub fn pong(payload: Payload<'f>) -> Self {
+  pub fn pong(payload: BytesMut) -> Self {
     Self {
       fin: true,
       opcode: OpCode::Pong,
@@ -237,10 +221,10 @@ impl<'f> Frame<'f> {
 
   pub fn mask(&mut self) {
     if let Some(mask) = self.mask {
-      crate::mask::unmask(self.payload.to_mut(), mask);
+      crate::mask::unmask(&mut self.payload, mask);
     } else {
       let mask: [u8; 4] = rand::random();
-      crate::mask::unmask(self.payload.to_mut(), mask);
+      crate::mask::unmask(&mut self.payload, mask);
       self.mask = Some(mask);
     }
   }
@@ -250,7 +234,7 @@ impl<'f> Frame<'f> {
   /// Note: By default, the frame payload is unmasked by `WebSocket::read_frame`.
   pub fn unmask(&mut self) {
     if let Some(mask) = self.mask {
-      crate::mask::unmask(self.payload.to_mut(), mask);
+      crate::mask::unmask(&mut self.payload, mask);
     }
   }
 
@@ -259,80 +243,35 @@ impl<'f> Frame<'f> {
   /// # Panics
   ///
   /// This method panics if the head buffer is not at least n-bytes long, where n is the size of the length field (0, 2, 4, or 10)
-  pub fn fmt_head(&mut self, head: &mut [u8]) -> usize {
-    head[0] = (self.fin as u8) << 7 | (self.opcode as u8);
+  pub fn fmt_head(&mut self, buf: &mut BytesMut) {
+    buf.put_u8((self.fin as u8) << 7 | (self.opcode as u8));
 
+    let mask = (self.mask.is_some() as u8) << 7;
     let len = self.payload.len();
-    let size = if len < 126 {
-      head[1] = len as u8;
-      2
+    if len < 126 {
+      buf.put_u8(len as u8 | mask);
     } else if len < 65536 {
-      head[1] = 126;
-      head[2..4].copy_from_slice(&(len as u16).to_be_bytes());
-      4
+      buf.put_u8(126 | mask);
+      buf.put_u16(len as u16);
     } else {
-      head[1] = 127;
-      head[2..10].copy_from_slice(&(len as u64).to_be_bytes());
-      10
+      buf.put_u8(127 | mask);
+      buf.put_u64(len as u64);
     };
 
     if let Some(mask) = self.mask {
-      head[1] |= 0x80;
-      head[size..size + 4].copy_from_slice(&mask);
-      size + 4
-    } else {
-      size
+      buf.put(&mask[..]);
     }
-  }
-
-  pub async fn writev<S>(
-    &mut self,
-    stream: &mut S,
-  ) -> Result<(), std::io::Error>
-  where
-    S: AsyncWriteExt + Unpin,
-  {
-    use std::io::IoSlice;
-
-    let mut head = [0; MAX_HEAD_SIZE];
-    let size = self.fmt_head(&mut head);
-
-    let total = size + self.payload.len();
-
-    let mut b = [IoSlice::new(&head[..size]), IoSlice::new(&self.payload)];
-
-    let mut n = stream.write_vectored(&b).await?;
-    if n == total {
-      return Ok(());
-    }
-
-    // Slighly more optimized than (unstable) write_all_vectored for 2 iovecs.
-    while n <= size {
-      b[0] = IoSlice::new(&head[n..size]);
-      n += stream.write_vectored(&b).await?;
-    }
-
-    // Header out of the way.
-    if n < total && n > size {
-      stream.write_all(&self.payload[n - size..]).await?;
-    }
-
-    Ok(())
   }
 
   /// Writes the frame to the buffer and returns a slice of the buffer containing the frame.
-  pub fn write<'a>(&mut self, buf: &'a mut Vec<u8>) -> &'a [u8] {
-    fn reserve_enough(buf: &mut Vec<u8>, len: usize) {
-      if buf.len() < len {
-        buf.resize(len, 0);
-      }
-    }
+  pub fn write(&mut self, buf: &mut BytesMut) {
     let len = self.payload.len();
-    reserve_enough(buf, len + MAX_HEAD_SIZE);
+    if len > buf.remaining_mut() {
+      buf.reserve(len + MAX_HEAD_SIZE - buf.remaining_mut());
+    }
 
-    let size = self.fmt_head(buf);
-    buf[size..size + len].copy_from_slice(&self.payload);
-    &buf[..size + len]
+    self.fmt_head(buf);
+    buf.put(&*self.payload);
   }
 }
 

@@ -38,10 +38,6 @@ pub enum WebSocketError {
   MissingSecWebSocketKey,
   #[error(transparent)]
   IoError(#[from] std::io::Error),
-  #[cfg(feature = "upgrade")]
   #[error(transparent)]
   HTTPError(#[from] hyper::Error),
-  #[cfg(feature = "unstable-split")]
-  #[error("Failed to send frame")]
-  SendError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
 }

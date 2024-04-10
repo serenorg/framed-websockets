@@ -33,9 +33,8 @@ use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
-use crate::Role;
-use crate::WebSocket;
 use crate::WebSocketError;
+use crate::WebSocketServer;
 
 fn sec_websocket_protocol(key: &[u8]) -> String {
   let mut sha1 = Sha1::new();
@@ -67,42 +66,6 @@ impl IncomingUpgrade {
     };
 
     Ok((response, stream))
-  }
-}
-
-#[cfg(feature = "with_axum")]
-#[async_trait::async_trait]
-impl<S> axum_core::extract::FromRequestParts<S> for IncomingUpgrade
-where
-  S: Sync,
-{
-  type Rejection = hyper::StatusCode;
-
-  async fn from_request_parts(
-    parts: &mut http::request::Parts,
-    _state: &S,
-  ) -> Result<Self, Self::Rejection> {
-    let key = parts
-      .headers
-      .get("Sec-WebSocket-Key")
-      .ok_or(hyper::StatusCode::BAD_REQUEST)?;
-    if parts
-      .headers
-      .get("Sec-WebSocket-Version")
-      .map(|v| v.as_bytes())
-      != Some(b"13")
-    {
-      return Err(hyper::StatusCode::BAD_REQUEST);
-    }
-
-    let on_upgrade = parts
-      .extensions
-      .remove::<hyper::upgrade::OnUpgrade>()
-      .ok_or(hyper::StatusCode::BAD_REQUEST)?;
-    Ok(Self {
-      on_upgrade,
-      key: sec_websocket_protocol(key.as_bytes()),
-    })
   }
 }
 
@@ -219,7 +182,8 @@ fn trim_end(data: &[u8]) -> &[u8] {
 }
 
 impl std::future::Future for UpgradeFut {
-  type Output = Result<WebSocket<TokioIo<hyper::upgrade::Upgraded>>, Error>;
+  type Output =
+    Result<WebSocketServer<TokioIo<hyper::upgrade::Upgraded>>, Error>;
 
   fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
     let this = self.project();
@@ -227,9 +191,8 @@ impl std::future::Future for UpgradeFut {
       Poll::Pending => return Poll::Pending,
       Poll::Ready(x) => x,
     };
-    Poll::Ready(Ok(WebSocket::after_handshake(
-      TokioIo::new(upgraded?),
-      Role::Server,
-    )))
+    Poll::Ready(Ok(WebSocketServer::after_handshake(TokioIo::new(
+      upgraded?,
+    ))))
   }
 }

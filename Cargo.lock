@@ -400,6 +400,8 @@ dependencies = [
  "base64",
  "bytes",
  "criterion",
+ "futures-core",
+ "futures-sink",
  "http",
  "http-body-util",
  "hyper",
@@ -408,10 +410,10 @@ dependencies = [
  "rand",
  "rustls-pemfile",
  "sha1",
- "simdutf8",
  "thiserror",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "trybuild",
  "utf-8",
  "webpki-roots",
@@ -1227,12 +1229,6 @@ checksum = "d8229b473baa5980ac72ef434c4415e70c4b5e71b423043adb4ba059f89c99a1"
 dependencies = [
  "libc",
 ]
-
-[[package]]
-name = "simdutf8"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f27f6278552951f1f2b8cf9da965d10969b2efdea95a6ec47987ab46edfe263a"
 
 [[package]]
 name = "slab"
