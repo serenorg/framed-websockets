@@ -82,7 +82,7 @@ async fn upgrade_websocket(
 ) -> Result<Response<Empty<Bytes>>, framed_websockets::WebSocketError> {
     assert!(framed_websockets::upgrade::is_upgrade_request(&request) == true);
 
-    let (response, stream) = framed_websockets::upgrade::upgrade(&mut request)?;
+    let (response, stream) = framed_websockets::upgrade::upgrade_downcast::<_, TcpStream>(&mut request)?;
     tokio::spawn(async move {
         let_assert!(Ok(mut stream) = stream.await);
         assert!(let Ok(()) = stream.send(framed_websockets::Frame::binary(b"Hello!".to_vec().into())).await);

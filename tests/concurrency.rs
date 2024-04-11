@@ -37,7 +37,7 @@ use tokio::net::TcpStream;
 
 const N_CLIENTS: usize = 20;
 
-async fn handle_client(client_id: usize, fut: upgrade::UpgradeFut) -> Result<()> {
+async fn handle_client(client_id: usize, fut: upgrade::UpgradeDowncastFut<TcpStream>) -> Result<()> {
     let mut ws = fut.await?;
     ws.send(Frame::binary(client_id.to_ne_bytes().to_vec().into()))
         .await
@@ -47,7 +47,7 @@ async fn handle_client(client_id: usize, fut: upgrade::UpgradeFut) -> Result<()>
 }
 
 async fn server_upgrade(mut req: Request<Incoming>) -> Result<Response<Empty<Bytes>>> {
-    let (response, fut) = upgrade::upgrade(&mut req)?;
+    let (response, fut) = upgrade::upgrade_downcast(&mut req)?;
 
     let client_id: usize = req
         .headers()

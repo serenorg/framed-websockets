@@ -22,4 +22,6 @@ pub enum WebSocketError {
     IoError(#[from] std::io::Error),
     #[error(transparent)]
     HTTPError(#[from] hyper::Error),
+    #[error("Could not downcast upgraded websocket IO")]
+    UpgradeDowncast,
 }

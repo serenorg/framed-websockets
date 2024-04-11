@@ -26,12 +26,14 @@ use hyper::Request;
 use hyper::Response;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls;
 use tokio_rustls::rustls::Certificate;
 use tokio_rustls::rustls::PrivateKey;
 use tokio_rustls::TlsAcceptor;
 
-async fn handle_client(fut: upgrade::UpgradeFut) -> Result<()> {
+async fn handle_client(fut: upgrade::UpgradeDowncastFut<TlsStream<TcpStream>>) -> Result<()> {
     let mut ws = fut.await?;
 
     while let Some(frame) = ws.next().await {
@@ -49,7 +51,7 @@ async fn handle_client(fut: upgrade::UpgradeFut) -> Result<()> {
 }
 
 async fn server_upgrade(mut req: Request<Incoming>) -> Result<Response<Empty<Bytes>>> {
-    let (response, fut) = upgrade::upgrade(&mut req)?;
+    let (response, fut) = upgrade::upgrade_downcast(&mut req)?;
 
     tokio::spawn(async move {
         if let Err(e) = handle_client(fut).await {

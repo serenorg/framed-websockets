@@ -21,6 +21,7 @@
 use base64;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use bytes::BufMut;
 use http_body_util::Empty;
 use hyper::body::Bytes;
 use hyper::Request;
@@ -29,12 +30,17 @@ use hyper_util::rt::TokioIo;
 use pin_project::pin_project;
 use sha1::Digest;
 use sha1::Sha1;
+use tokio::io::AsyncRead;
+use tokio::io::AsyncWrite;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
+use tokio_util::codec::FramedParts;
 
 use crate::WebSocketError;
 use crate::WebSocketServer;
+use crate::WsCodec;
 
 fn sec_websocket_protocol(key: &[u8]) -> String {
     let mut sha1 = Sha1::new();
@@ -49,9 +55,10 @@ type Error = WebSocketError;
 /// A future that resolves to a websocket stream when the associated HTTP upgrade completes.
 #[pin_project]
 #[derive(Debug)]
-pub struct UpgradeFut {
+pub struct UpgradeDowncastFut<I> {
     #[pin]
     inner: hyper::upgrade::OnUpgrade,
+    _downcast: PhantomData<I>,
 }
 
 /// Try to upgrade a received `hyper::Request` to a websocket connection.
@@ -68,9 +75,9 @@ pub struct UpgradeFut {
 /// To check if a request is a websocket upgrade request, you can use [`is_upgrade_request`].
 /// Alternatively you can inspect the `Connection` and `Upgrade` headers manually.
 ///
-pub fn upgrade<B>(
+pub fn upgrade_downcast<B, I>(
     mut request: impl std::borrow::BorrowMut<Request<B>>,
-) -> Result<(Response<Empty<Bytes>>, UpgradeFut), Error> {
+) -> Result<(Response<Empty<Bytes>>, UpgradeDowncastFut<I>), Error> {
     let request = request.borrow_mut();
 
     let key = request
@@ -97,8 +104,9 @@ pub fn upgrade<B>(
         .body(Empty::new())
         .expect("bug: failed to build response");
 
-    let stream = UpgradeFut {
+    let stream = UpgradeDowncastFut {
         inner: hyper::upgrade::on(request),
+        _downcast: PhantomData,
     };
 
     Ok((response, stream))
@@ -154,17 +162,24 @@ fn trim_end(data: &[u8]) -> &[u8] {
     }
 }
 
-impl std::future::Future for UpgradeFut {
-    type Output = Result<WebSocketServer<TokioIo<hyper::upgrade::Upgraded>>, Error>;
+impl<I: AsyncRead + AsyncWrite + Unpin + 'static> std::future::Future
+    for UpgradeDowncastFut<I>
+{
+    type Output = Result<WebSocketServer<I>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = self.project();
-        let upgraded = match this.inner.poll(cx) {
+        let upgraded = match this.inner.poll(cx)? {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(x) => x,
         };
-        Poll::Ready(Ok(WebSocketServer::after_handshake(TokioIo::new(
-            upgraded?,
-        ))))
+        let upgraded = upgraded
+            .downcast::<TokioIo<I>>()
+            .map_err(|_| Error::UpgradeDowncast)?;
+
+        let mut parts = FramedParts::new(upgraded.io.into_inner(), WsCodec::default());
+        parts.read_buf.put(upgraded.read_buf);
+
+        Poll::Ready(Ok(WebSocketServer::from_parts(parts)))
     }
 }

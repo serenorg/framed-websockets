@@ -107,6 +107,7 @@ use std::task::Poll;
 use tokio_util::codec::Decoder;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::Framed;
+use tokio_util::codec::FramedParts;
 
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
@@ -130,14 +131,18 @@ impl<S> WebSocketServer<S> {
         S: AsyncRead + AsyncWrite + Unpin,
     {
         Self {
-            framed: Framed::new(
-                stream,
-                WsCodec {
-                    decode_state: FrameDecoderState::Init,
-                    max_message_size: 64 * 1024, // 64KiB
-                    is_closed: false,
-                },
-            ),
+            framed: Framed::new(stream, WsCodec::default()),
+            obligated_send: None,
+            recv: None,
+        }
+    }
+
+    fn from_parts(parts: FramedParts<S, WsCodec>) -> Self
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        Self {
+            framed: Framed::from_parts(parts),
             obligated_send: None,
             recv: None,
         }
@@ -291,6 +296,16 @@ struct WsCodec {
     max_message_size: usize,
 
     is_closed: bool,
+}
+
+impl Default for WsCodec {
+    fn default() -> Self {
+        Self {
+            decode_state: FrameDecoderState::Init,
+            max_message_size: 64 * 1024, // 64KiB
+            is_closed: false,
+        }
+    }
 }
 
 impl Decoder for WsCodec {

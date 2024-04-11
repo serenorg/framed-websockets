@@ -25,8 +25,9 @@ use hyper::service::service_fn;
 use hyper::Request;
 use hyper::Response;
 use tokio::net::TcpListener;
+use tokio::net::TcpStream;
 
-async fn handle_client(fut: upgrade::UpgradeFut) -> Result<(), WebSocketError> {
+async fn handle_client(fut: upgrade::UpgradeDowncastFut<TcpStream>) -> Result<(), WebSocketError> {
     let mut ws = fut.await?;
 
     let mut expect_cont = false;
@@ -55,7 +56,7 @@ async fn handle_client(fut: upgrade::UpgradeFut) -> Result<(), WebSocketError> {
 async fn server_upgrade(
     mut req: Request<Incoming>,
 ) -> Result<Response<Empty<Bytes>>, WebSocketError> {
-    let (response, fut) = upgrade::upgrade(&mut req)?;
+    let (response, fut) = upgrade::upgrade_downcast(&mut req)?;
 
     tokio::task::spawn(async move {
         if let Err(e) = tokio::task::unconstrained(handle_client(fut)).await {
