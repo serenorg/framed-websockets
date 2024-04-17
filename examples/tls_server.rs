@@ -72,7 +72,7 @@ fn tls_acceptor() -> Result<TlsAcceptor> {
     let certs = rustls_pemfile::certs(&mut &*CERT)
         .map(|mut certs| certs.drain(..).map(Certificate).collect())
         .unwrap();
-    dbg!(&certs);
+
     let config = rustls::ServerConfig::builder()
         .with_safe_defaults()
         .with_no_client_auth()

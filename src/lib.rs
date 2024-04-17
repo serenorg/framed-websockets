@@ -98,6 +98,8 @@ use bytes::Buf;
 use bytes::BytesMut;
 use futures_core::Stream;
 use futures_sink::Sink;
+use hyper::upgrade::Parts;
+use hyper_util::rt::TokioIo;
 use mask::unmask;
 use pin_project::pin_project;
 use std::pin::Pin;
@@ -126,21 +128,23 @@ pub struct WebSocketServer<S> {
 }
 
 impl<S> WebSocketServer<S> {
-    pub fn after_handshake(stream: S) -> Self
-    where
-        S: AsyncRead + AsyncWrite + Unpin,
-    {
-        Self {
-            framed: Framed::new(stream, WsCodec::default()),
-            obligated_send: None,
-            recv: None,
-        }
+    pub fn after_handshake(stream: S) -> Self {
+        let parts = FramedParts::new(stream, WsCodec::default());
+        Self::from_parts(parts)
     }
 
-    fn from_parts(parts: FramedParts<S, WsCodec>) -> Self
-    where
-        S: AsyncRead + AsyncWrite + Unpin,
-    {
+    pub fn after_handshake_with_bytes(stream: S, b: BytesMut) -> Self {
+        let mut parts = FramedParts::new(stream, WsCodec::default());
+        parts.read_buf = b;
+
+        Self::from_parts(parts)
+    }
+
+    pub fn after_handshake_with_parts(parts: Parts<TokioIo<S>>) -> Self {
+        Self::after_handshake_with_bytes(parts.io.into_inner(), parts.read_buf.as_ref().into())
+    }
+
+    fn from_parts(parts: FramedParts<S, WsCodec>) -> Self {
         Self {
             framed: Framed::from_parts(parts),
             obligated_send: None,
