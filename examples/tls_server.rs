@@ -15,6 +15,7 @@
 use anyhow::Result;
 use framed_websockets::upgrade;
 use framed_websockets::OpCode;
+use framed_websockets::WebSocketServer;
 use futures_util::SinkExt;
 use futures_util::StreamExt;
 use http_body_util::Empty;
@@ -22,19 +23,19 @@ use hyper::body::Bytes;
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
+use hyper::upgrade::OnUpgrade;
 use hyper::Request;
 use hyper::Response;
+use hyper_util::rt::TokioIo;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls;
 use tokio_rustls::rustls::Certificate;
 use tokio_rustls::rustls::PrivateKey;
 use tokio_rustls::TlsAcceptor;
 
-async fn handle_client(fut: upgrade::UpgradeDowncastFut<TlsStream<TcpStream>>) -> Result<()> {
-    let mut ws = fut.await?;
+async fn handle_client(fut: OnUpgrade) -> Result<()> {
+    let mut ws = WebSocketServer::after_handshake(TokioIo::new(fut.await?));
 
     while let Some(frame) = ws.next().await {
         let frame = frame?;
@@ -51,7 +52,7 @@ async fn handle_client(fut: upgrade::UpgradeDowncastFut<TlsStream<TcpStream>>) -
 }
 
 async fn server_upgrade(mut req: Request<Incoming>) -> Result<Response<Empty<Bytes>>> {
-    let (response, fut) = upgrade::upgrade_downcast(&mut req)?;
+    let (response, fut) = upgrade::upgrade(&mut req)?;
 
     tokio::spawn(async move {
         if let Err(e) = handle_client(fut).await {

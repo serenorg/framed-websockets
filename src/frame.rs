@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 
 use crate::WebSocketError;
 
@@ -46,14 +46,14 @@ pub struct Frame {
     /// The opcode of the frame.
     pub opcode: OpCode,
     /// The payload of the frame.
-    pub payload: Bytes,
+    pub payload: BytesMut,
 }
 
 const MAX_HEAD_SIZE: usize = 16;
 
 impl Frame {
     /// Creates a new WebSocket `Frame`.
-    pub fn new(fin: bool, opcode: OpCode, payload: Bytes) -> Self {
+    pub fn new(fin: bool, opcode: OpCode, payload: BytesMut) -> Self {
         Self {
             fin,
             opcode,
@@ -64,7 +64,7 @@ impl Frame {
     /// Create a new WebSocket binary `Frame`.
     ///
     /// This is a convenience method for `Frame::new(true, OpCode::Binary, None, payload)`.
-    pub fn binary(payload: Bytes) -> Self {
+    pub fn binary(payload: BytesMut) -> Self {
         Self {
             fin: true,
             opcode: OpCode::Binary,
@@ -85,7 +85,7 @@ impl Frame {
         Self {
             fin: true,
             opcode: OpCode::Close,
-            payload: payload.freeze(),
+            payload,
         }
     }
 
@@ -94,7 +94,7 @@ impl Frame {
     /// This is a convenience method for `Frame::new(true, OpCode::Close, None, payload)`.
     ///
     /// This method does not check if `payload` is valid Close frame payload.
-    pub fn close_raw(payload: Bytes) -> Self {
+    pub fn close_raw(payload: BytesMut) -> Self {
         Self {
             fin: true,
             opcode: OpCode::Close,
@@ -105,7 +105,7 @@ impl Frame {
     /// Create a new WebSocket pong `Frame`.
     ///
     /// This is a convenience method for `Frame::new(true, OpCode::Pong, None, payload)`.
-    pub fn pong(payload: Bytes) -> Self {
+    pub fn pong(payload: BytesMut) -> Self {
         Self {
             fin: true,
             opcode: OpCode::Pong,

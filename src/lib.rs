@@ -88,6 +88,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![forbid(unsafe_code)]
 
+mod close;
 mod error;
 mod frame;
 mod mask;
@@ -96,7 +97,9 @@ pub mod upgrade;
 
 use bytes::Buf;
 
+use bytes::BufMut;
 use bytes::BytesMut;
+use close::CloseCode;
 use futures_core::Stream;
 use futures_sink::Sink;
 use hyper::upgrade::Parts;
@@ -267,8 +270,20 @@ pub(crate) fn process_frame(
 ) -> (Result<Option<Frame>, WebSocketError>, Option<Frame>) {
     match frame.opcode {
         OpCode::Close => {
-            // technically we should check the payload... but we don't need it...
-            let obligated_send = Frame::close_raw(std::mem::take(&mut frame.payload));
+            let mut payload = std::mem::take(&mut frame.payload);
+            if let &[hi, lo, ..] = &*payload {
+                let code = CloseCode::from(u16::from_be_bytes([hi, lo]));
+                let response = if !code.is_allowed() {
+                    CloseCode::Protocol
+                } else {
+                    CloseCode::Normal
+                };
+                payload[..2].copy_from_slice(&u16::from(response).to_be_bytes());
+            } else if payload.len() == 1 {
+                payload.clear();
+                payload.put_u16(u16::from(CloseCode::Protocol));
+            }
+            let obligated_send = Frame::close_raw(payload);
             (Ok(Some(frame)), Some(obligated_send))
         }
         OpCode::Ping => (Ok(None), Some(Frame::pong(frame.payload))),
@@ -418,7 +433,7 @@ impl Decoder for WsCodec {
                     let mut payload = src.split_to(max_len);
                     unmask(&mut payload, mask);
 
-                    let frame = Frame::new(max_len as u64 == len && fin, op, payload.freeze());
+                    let frame = Frame::new(max_len as u64 == len && fin, op, payload);
 
                     if max_len as u64 == len {
                         self.decode_state = FrameDecoderState::Init;
