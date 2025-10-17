@@ -5,7 +5,7 @@ version = "0.1.0"
 authors = ["Conrad Ludgate <conrad@neon.tech>"]
 license = "Apache-2.0"
 edition = "2021"
-repository = "https://github.com/neondatabase/framed-websockets"
+repository = "https://github.com/serenorg/framed-websockets"
 
 [dependencies]
 futures-core = "0.3"
